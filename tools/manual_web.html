@@ -1,0 +1,227 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Prueba manual de rebalanceo</title>
+    <style>
+      :root {
+        color-scheme: light;
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        color: #1d2939;
+        background: #f3f6fa;
+      }
+      .visually-hidden {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        padding: 0;
+        margin: -1px;
+        overflow: hidden;
+        clip: rect(0, 0, 0, 0);
+        white-space: nowrap;
+        border: 0;
+      }
+      * { box-sizing: border-box; }
+      body { margin: 0; padding: 32px 16px; }
+      main { width: min(100%, 980px); margin: 0 auto; }
+      h1 { margin: 0 0 8px; font-size: clamp(1.7rem, 4vw, 2.3rem); }
+      h2 { margin: 0; font-size: 1.25rem; }
+      p { line-height: 1.55; }
+      .intro { margin: 0 0 24px; color: #475467; }
+      .panel {
+        padding: 24px;
+        border: 1px solid #d0d5dd;
+        border-radius: 12px;
+        background: #fff;
+        box-shadow: 0 4px 16px rgb(16 24 40 / 5%);
+      }
+      .panel + .panel { margin-top: 20px; }
+      .table-wrap { overflow-x: auto; margin-top: 16px; }
+      table { width: 100%; border-collapse: collapse; }
+      th, td { padding: 10px 8px; border-bottom: 1px solid #eaecf0; text-align: left; }
+      th { color: #475467; font-size: 0.83rem; white-space: nowrap; }
+      input {
+        width: 100%;
+        min-width: 90px;
+        min-height: 42px;
+        padding: 8px 10px;
+        border: 1px solid #98a2b3;
+        border-radius: 6px;
+        color: inherit;
+        font: inherit;
+      }
+      input:focus-visible, button:focus-visible {
+        outline: 3px solid #84caff;
+        outline-offset: 2px;
+      }
+      .ticker-input { min-width: 105px; }
+      button {
+        min-height: 42px;
+        padding: 9px 14px;
+        border: 0;
+        border-radius: 7px;
+        font: inherit;
+        font-weight: 650;
+        cursor: pointer;
+      }
+      .primary { color: #fff; background: #175cd3; }
+      .primary:hover { background: #1849a9; }
+      .secondary { color: #175cd3; background: #eff8ff; }
+      .remove { min-width: 42px; padding: 8px; color: #b42318; background: #fef3f2; }
+      .actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 18px; }
+      .hint { margin: 12px 0 0; color: #667085; font-size: 0.9rem; }
+      .status { margin: 16px 0 0; font-weight: 600; }
+      .status.error { color: #b42318; }
+      .summary { margin: 14px 0; color: #344054; }
+      .empty { padding: 18px 0; color: #475467; }
+      .result-table td { white-space: nowrap; }
+      @media (max-width: 600px) {
+        body { padding: 20px 10px; }
+        .panel { padding: 16px 12px; }
+        th, td { padding: 8px 6px; }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Prueba manual de rebalanceo</h1>
+      <p class="intro">Ingresa tus posiciones y cotizaciones para comprobar las órdenes propuestas. Esta herramienta es solo para pruebas manuales: no obtiene precios ni ejecuta operaciones.</p>
+
+      <section class="panel" aria-labelledby="input-title">
+        <h2 id="input-title">Portafolio</h2>
+        <form id="portfolio-form">
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th scope="col">Ticker</th>
+                  <th scope="col">Acciones</th>
+                  <th scope="col">Precio actual</th>
+                  <th scope="col">Objetivo (%)</th>
+                  <th scope="col"><span class="visually-hidden">Quitar fila</span></th>
+                </tr>
+              </thead>
+              <tbody id="positions"></tbody>
+            </table>
+          </div>
+          <div class="actions">
+            <button class="secondary" id="add-row" type="button">+ Agregar activo</button>
+            <button class="primary" type="submit">Calcular / recalcular</button>
+          </div>
+          <p class="hint">Los objetivos deben sumar 100%. Usa la misma moneda para todos los precios. Se permiten fracciones de acciones.</p>
+        </form>
+        <p class="status" id="status" role="status" aria-live="polite"></p>
+      </section>
+
+      <section class="panel" id="results" aria-labelledby="results-title" hidden>
+        <h2 id="results-title">Órdenes propuestas</h2>
+        <p class="summary" id="summary"></p>
+        <div class="table-wrap">
+          <table class="result-table">
+            <thead>
+              <tr>
+                <th scope="col">Operación</th>
+                <th scope="col">Ticker</th>
+                <th scope="col">Acciones</th>
+                <th scope="col">Valor estimado</th>
+                <th scope="col">Peso actual</th>
+                <th scope="col">Peso objetivo</th>
+              </tr>
+            </thead>
+            <tbody id="orders"></tbody>
+          </table>
+        </div>
+        <p class="empty" id="no-orders" hidden>El portafolio ya está balanceado o no tiene valor invertido.</p>
+      </section>
+    </main>
+
+    <template id="position-row-template">
+      <tr>
+        <td><input class="ticker-input" data-field="ticker" aria-label="Ticker" placeholder="AAPL" autocomplete="off" required></td>
+        <td><input data-field="shares" aria-label="Acciones" type="number" min="0" step="any" placeholder="10" required></td>
+        <td><input data-field="price" aria-label="Precio actual" type="number" min="0" step="any" placeholder="20.00" required></td>
+        <td><input data-field="target_percent" aria-label="Porcentaje objetivo" type="number" min="0" max="100" step="any" placeholder="60" required></td>
+        <td><button class="remove" type="button" aria-label="Quitar activo">×</button></td>
+      </tr>
+    </template>
+
+    <script>
+      const form = document.querySelector("#portfolio-form");
+      const rows = document.querySelector("#positions");
+      const template = document.querySelector("#position-row-template");
+      const status = document.querySelector("#status");
+      const results = document.querySelector("#results");
+      const orderRows = document.querySelector("#orders");
+      const noOrders = document.querySelector("#no-orders");
+
+      function addRow() {
+        const row = template.content.firstElementChild.cloneNode(true);
+        row.querySelector(".remove").addEventListener("click", () => {
+          row.remove();
+          if (rows.children.length === 0) addRow();
+        });
+        rows.append(row);
+      }
+
+      function addCell(row, text) {
+        const cell = document.createElement("td");
+        cell.textContent = text;
+        row.append(cell);
+      }
+
+      function showOrders(data) {
+        orderRows.replaceChildren();
+        noOrders.hidden = data.orders.length !== 0;
+        document.querySelector("#summary").textContent =
+          `Valor actual del portafolio: ${data.portfolio_value}`;
+
+        for (const order of data.orders) {
+          const row = document.createElement("tr");
+          addCell(row, order.side === "buy" ? "Comprar" : "Vender");
+          addCell(row, order.ticker);
+          addCell(row, order.shares);
+          addCell(row, order.estimated_value);
+          addCell(row, `${order.current_weight_percent}%`);
+          addCell(row, `${order.target_weight_percent}%`);
+          orderRows.append(row);
+        }
+        results.hidden = false;
+      }
+
+      document.querySelector("#add-row").addEventListener("click", addRow);
+
+      form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        status.textContent = "Calculando…";
+        status.classList.remove("error");
+        results.hidden = true;
+
+        const positions = Array.from(rows.querySelectorAll("tr"), (row) => {
+          const position = {};
+          for (const input of row.querySelectorAll("input")) {
+            position[input.dataset.field] = input.value.trim();
+          }
+          return position;
+        });
+
+        try {
+          const response = await fetch("/rebalance", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ positions }),
+          });
+          const data = await response.json();
+          if (!response.ok) throw new Error(data.error || "No se pudo calcular el rebalanceo.");
+          showOrders(data);
+          status.textContent = "Cálculo listo. Puedes cambiar los datos y recalcular.";
+        } catch (error) {
+          status.textContent = error.message;
+          status.classList.add("error");
+        }
+      });
+
+      addRow();
+    </script>
+  </body>
+</html>
